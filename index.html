@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BPI Grocery Challenge — Control</title>
+<!--
+  CONTROL PANEL (the operator's "backend")
+  ----------------------------------------
+  The operator drives the whole game from here. Item list + prices come from
+  itemlist.txt (one item per line — see that file). Everything shown on the big
+  VIEW screen is pushed through a single localStorage value:
+
+      key:  "grocery.state"
+      value(JSON): { scene, budget, total, count, liveTotal, nonce }
+
+  We also remember the operator's working set (quantities / budget / toggle) in
+  "grocery.control" so an accidental refresh doesn't lose the round.
+
+  The "mini view" in the header is just view.html loaded in an <iframe> and
+  scaled down — so it is LITERALLY what the big screen is showing, live.
+-->
+<style>
+  :root{
+    --bpi-red:#A6192E; --bpi-red-dk:#7C0E20; --bpi-red-dker:#520712;
+    --bpi-gold:#F6B60E; --bpi-gold-lt:#FFD65A; --gold-dk:#c98f00;
+    --cream:#FFF7E9; --cream-2:#FBEFD6; --paper:#ffffff;
+    --ink:#2A0E12; --muted:#8a6f6f; --line:#e7d9c2;
+    --good:#23A85A; --over:#E23A2E; --under:#2C9BD6;
+    --sans:"Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    --pop:"Arial Black", "Segoe UI", var(--sans);
+    --footer-h:150px;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    background:var(--cream);
+    background-image:
+      radial-gradient(120% 60% at 50% -20%, rgba(246,182,14,.16), transparent 60%),
+      repeating-linear-gradient(135deg, rgba(166,25,46,.035) 0 26px, transparent 26px 52px);
+    display:flex; flex-direction:column;
+    height:100vh; overflow:hidden;
+  }
+  button{ font-family:var(--sans); cursor:pointer; }
+
+  /* ============ HEADER ============ */
+  header{
+    flex:0 0 auto;
+    position:relative;
+    color:var(--cream);
+    background:linear-gradient(180deg, var(--bpi-red) 0%, var(--bpi-red-dk) 100%);
+    box-shadow:0 6px 18px rgba(0,0,0,.25);
+    z-index:5;
+  }
+  /* bunting strip along the very top */
+  .bunting{ display:flex; height:20px; }
+  .bunting i{
+    flex:1 1 auto; height:0; width:0;
+    border-left:min(2.2vw,18px) solid transparent;
+    border-right:min(2.2vw,18px) solid transparent;
+    border-top:min(2.6vw,20px) solid var(--f);
+  }
+  .head-inner{
+    max-width:1180px; margin:0 auto;
+    padding:.85rem clamp(1rem,3vw,2rem) 1rem;
+    display:flex; align-items:center; gap:1rem; justify-content:space-between;
+  }
+  .brand{ display:flex; align-items:center; gap:.9rem; min-width:0; }
+  .diamond{
+    flex:0 0 auto;
+    width:46px; height:46px; display:grid; place-items:center;
+    background:var(--cream); color:var(--bpi-red);
+    transform:rotate(45deg); border-radius:9px;
+    box-shadow:inset 0 0 0 2px var(--bpi-gold), 0 4px 10px rgba(0,0,0,.25);
+  }
+  .diamond span{ transform:rotate(-45deg); font-family:var(--pop); font-size:.95rem; }
+  .titles h1{
+    font-family:var(--pop); font-size:clamp(1.05rem,2.4vw,1.6rem);
+    letter-spacing:.01em; line-height:1; text-transform:uppercase;
+  }
+  .titles p{ font-size:.72rem; letter-spacing:.28em; text-transform:uppercase; opacity:.8; margin-top:.28rem; }
+
+  .head-right{ display:flex; align-items:flex-end; gap:.9rem; }
+  .openbtn{
+    background:var(--bpi-gold); color:var(--ink);
+    border:none; font-weight:800; font-size:.85rem;
+    padding:.6rem .9rem; border-radius:10px;
+    box-shadow:0 4px 0 var(--gold-dk); white-space:nowrap;
+    transition:transform .08s, box-shadow .08s;
+  }
+  .openbtn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--gold-dk); }
+
+  /* mini view = scaled iframe of view.html */
+  .mini-wrap{ text-align:center; }
+  .mini-cap{
+    font-size:.6rem; letter-spacing:.22em; text-transform:uppercase;
+    opacity:.85; margin-bottom:.3rem; display:flex; align-items:center; gap:.4rem; justify-content:center;
+  }
+  .mini-cap .dot{ width:7px; height:7px; border-radius:50%; background:var(--bpi-gold-lt); box-shadow:0 0 0 0 rgba(255,214,90,.6); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 rgba(255,214,90,.55);} 70%{box-shadow:0 0 0 7px rgba(255,214,90,0);} 100%{box-shadow:0 0 0 0 rgba(255,214,90,0);} }
+  .mini{
+    --mw:236;                       /* width of the mini monitor, px (unitless for the scale calc) */
+    width:calc(var(--mw)*1px);
+    aspect-ratio:16/9;
+    position:relative; overflow:hidden;
+    border-radius:8px;
+    border:3px solid #120406;
+    box-shadow:0 6px 16px rgba(0,0,0,.35);
+    background:#520712;
+  }
+  .mini iframe{
+    position:absolute; top:0; left:0;
+    width:1280px; height:720px; border:0;
+    transform:scale(calc(var(--mw)/1280));
+    transform-origin:top left;
+    pointer-events:none;
+  }
+
+  /* ============ ITEM LIST ============ */
+  main{
+    flex:1 1 auto; overflow-y:auto;
+    padding:1.25rem clamp(1rem,3vw,2rem) calc(var(--footer-h) + 1.5rem);
+    scrollbar-gutter:stable;
+  }
+  .list{ max-width:1180px; margin:0 auto; display:flex; flex-direction:column; gap:.6rem; }
+  .list-head{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin:.2rem .2rem .5rem;
+  }
+  .list-head h2{ font-family:var(--pop); text-transform:uppercase; letter-spacing:.04em; color:var(--bpi-red); font-size:1.05rem; }
+  .list-head span{ font-size:.8rem; color:var(--muted); }
+
+  .item{
+    display:flex; align-items:center; gap:1rem;
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-left:6px solid var(--line);
+    border-radius:14px;
+    padding:.6rem .9rem;
+    transition:border-color .15s, box-shadow .15s, transform .06s;
+  }
+  .item.active{
+    border-color:var(--bpi-gold);
+    border-left-color:var(--bpi-red);
+    box-shadow:0 4px 14px rgba(166,25,46,.12);
+  }
+  .thumb{
+    flex:0 0 auto; width:58px; height:58px; border-radius:11px;
+    background:var(--cream-2);
+    display:grid; place-items:center; overflow:hidden;
+    font-size:1.9rem; line-height:1;
+    box-shadow:inset 0 0 0 1px var(--line);
+  }
+  .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .info{ flex:1 1 auto; min-width:0; }
+  .info .nm{ font-weight:700; font-size:1.02rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .info .pr{ color:var(--muted); font-size:.86rem; margin-top:.1rem; }
+  .info .sub{ color:var(--bpi-red); font-weight:800; font-size:.9rem; margin-top:.12rem; min-height:1.1em; }
+
+  .stepper{ flex:0 0 auto; display:flex; align-items:center; gap:.35rem; }
+  .step{
+    width:42px; height:42px; border-radius:11px; border:none;
+    font-size:1.4rem; font-weight:900; line-height:1;
+    display:grid; place-items:center;
+    background:var(--cream-2); color:var(--bpi-red);
+    box-shadow:0 3px 0 var(--line);
+    transition:transform .07s, box-shadow .07s, background .12s;
+  }
+  .step:hover{ background:#f3e6cd; }
+  .step:active{ transform:translateY(3px); box-shadow:none; }
+  .step.plus{ background:var(--bpi-red); color:var(--cream); box-shadow:0 3px 0 var(--bpi-red-dker); }
+  .step.plus:hover{ background:#b81f37; }
+  .qty{
+    width:56px; height:42px; text-align:center;
+    font-size:1.15rem; font-weight:800; color:var(--ink);
+    border:1px solid var(--line); border-radius:10px; background:#fff;
+    -moz-appearance:textfield;
+  }
+  .qty::-webkit-outer-spin-button,.qty::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+  .qty:focus{ outline:none; border-color:var(--bpi-gold); box-shadow:0 0 0 3px rgba(246,182,14,.25); }
+
+  .empty-note{ text-align:center; color:var(--muted); padding:2rem; }
+  .empty-note code{ background:var(--cream-2); padding:.1em .4em; border-radius:5px; }
+
+  /* ============ FOOTER (fixed) ============ */
+  footer{
+    flex:0 0 auto;
+    position:fixed; left:0; right:0; bottom:0; z-index:6;
+    color:var(--cream);
+    background:linear-gradient(180deg, var(--bpi-red) 0%, var(--bpi-red-dk) 100%);
+    box-shadow:0 -8px 22px rgba(0,0,0,.28);
+    border-top:4px solid var(--bpi-gold);
+  }
+  .footbar{
+    max-width:1180px; margin:0 auto;
+    padding:.9rem clamp(1rem,3vw,2rem);
+    display:flex; align-items:center; gap:clamp(1rem,2.5vw,2.2rem); flex-wrap:wrap;
+  }
+  .fgroup{ display:flex; flex-direction:column; gap:.4rem; }
+  .fgroup > label, .flabel{
+    font-size:.62rem; letter-spacing:.2em; text-transform:uppercase; opacity:.85; font-weight:700;
+  }
+  .budget .brow{ display:flex; gap:.5rem; align-items:center; }
+  .bwrap{
+    display:flex; align-items:center; gap:.25rem;
+    background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35);
+    border-radius:10px; padding:.15rem .55rem; font-weight:800; font-size:1.1rem;
+  }
+  .bwrap input{
+    width:92px; background:transparent; border:none; color:var(--cream);
+    font-size:1.1rem; font-weight:800; font-family:var(--sans);
+  }
+  .bwrap input:focus{ outline:none; }
+  .btn{
+    border:none; border-radius:10px; font-weight:800; padding:.55rem .85rem; font-size:.85rem;
+    transition:transform .08s, box-shadow .08s, background .12s; white-space:nowrap;
+  }
+  .btn.gold{ background:var(--bpi-gold); color:var(--ink); box-shadow:0 4px 0 var(--gold-dk); }
+  .btn.gold:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--gold-dk); }
+  .btn.ghost{ background:rgba(255,255,255,.12); color:var(--cream); border:1px solid rgba(255,255,255,.4); }
+  .btn.ghost:hover{ background:rgba(255,255,255,.2); }
+  .btn.calc{
+    background:var(--bpi-gold); color:var(--ink);
+    font-family:var(--pop); font-size:1.05rem; padding:.7rem 1.3rem;
+    text-transform:uppercase; letter-spacing:.02em;
+    box-shadow:0 5px 0 var(--gold-dk);
+  }
+  .btn.calc:hover{ background:var(--bpi-gold-lt); }
+  .btn.calc:active{ transform:translateY(4px); box-shadow:0 1px 0 var(--gold-dk); }
+
+  /* live toggle switch */
+  .switch{ position:relative; display:inline-block; width:58px; height:32px; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{
+    position:absolute; inset:0; cursor:pointer;
+    background:rgba(0,0,0,.28); border-radius:999px; transition:.2s;
+    border:1px solid rgba(255,255,255,.3);
+  }
+  .slider::before{
+    content:""; position:absolute; height:24px; width:24px; left:3px; top:3px;
+    background:var(--cream); border-radius:50%; transition:.2s;
+    box-shadow:0 2px 4px rgba(0,0,0,.3);
+  }
+  .switch input:checked + .slider{ background:var(--good); }
+  .switch input:checked + .slider::before{ transform:translateX(26px); }
+  .switch input:focus-visible + .slider{ box-shadow:0 0 0 3px rgba(246,182,14,.5); }
+  .live-lbl{ display:flex; align-items:center; gap:.6rem; }
+  .live-state{ font-size:.75rem; font-weight:800; opacity:.9; min-width:2.2em; }
+
+  /* totals block */
+  .totals{ margin-left:auto; align-items:flex-end; text-align:right; }
+  .totals .tval{ font-family:var(--pop); font-size:clamp(1.6rem,3.5vw,2.4rem); line-height:1; }
+  .totals .tmeta{ font-size:.78rem; font-weight:700; opacity:.9; margin-top:.15rem; }
+  .totals .tmeta.over{ color:var(--bpi-gold-lt); }
+
+  .actions{ flex-direction:row; align-items:center; gap:.6rem; }
+
+  @media (max-width:720px){
+    .head-right{ flex-direction:column; align-items:flex-end; gap:.5rem; }
+    .mini{ --mw:150; }
+    .titles p{ display:none; }
+    .totals{ margin-left:0; }
+  }
+  @media (max-width:520px){
+    .mini-wrap{ display:none; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <div class="bunting" id="bunting" aria-hidden="true"></div>
+    <div class="head-inner">
+      <div class="brand">
+        <div class="diamond" aria-hidden="true"><span>BPI</span></div>
+        <div class="titles">
+          <h1>Grocery Challenge</h1>
+          <p>Operator Control</p>
+        </div>
+      </div>
+      <div class="head-right">
+        <button class="openbtn" id="openView" type="button">Open View Screen ↗</button>
+        <div class="mini-wrap">
+          <div class="mini-cap"><span class="dot"></span> Live View</div>
+          <div class="mini"><iframe id="miniView" src="view.html" title="Live view preview" tabindex="-1"></iframe></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="list">
+      <div class="list-head">
+        <h2>🛒 Items on the Shelf</h2>
+        <span id="itemCount"></span>
+      </div>
+      <div id="rows"></div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footbar">
+      <div class="fgroup budget">
+        <label>Budget</label>
+        <div class="brow">
+          <div class="bwrap">₱ <input id="budget" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+          <button class="btn gold" id="showBudget" type="button">Show ↗</button>
+        </div>
+      </div>
+
+      <div class="fgroup live">
+        <label>Live Total</label>
+        <div class="live-lbl">
+          <label class="switch"><input type="checkbox" id="liveToggle"><span class="slider"></span></label>
+          <span class="live-state" id="liveState">Off</span>
+        </div>
+      </div>
+
+      <div class="fgroup totals">
+        <div class="flabel">Cart Total</div>
+        <div class="tval" id="totalVal">₱0</div>
+        <div class="tmeta" id="totalMeta">Set a budget to begin</div>
+      </div>
+
+      <div class="fgroup actions">
+        <button class="btn calc" id="calc" type="button">🎉 Calculate!</button>
+        <button class="btn ghost" id="reset" type="button">Reset</button>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+  (function(){
+    "use strict";
+    const STATE_KEY   = "grocery.state";     // what the VIEW renders
+    const CONTROL_KEY = "grocery.control";   // operator's saved working set
+
+    // ---------- helpers ----------
+    function peso(n){
+      const r = Math.round((Number(n)||0) * 100) / 100;
+      const hasDec = Math.abs(r % 1) > 0.0001;
+      return "₱" + r.toLocaleString("en-PH", {
+        minimumFractionDigits: hasDec ? 2 : 0, maximumFractionDigits: 2
+      });
+    }
+    const EMOJI = [
+      [/fish/i,"🐟"],[/noodle/i,"🍜"],[/diaper/i,"👶"],[/oil/i,"🫗"],[/cereal/i,"🥣"],
+      [/hotdog|sausage/i,"🌭"],[/egg/i,"🥚"],[/detergent|soap|shampoo/i,"🧴"],
+      [/corned|beef|meat|canned|can\b/i,"🥫"],[/chicken/i,"🍗"],[/pork/i,"🥓"],
+      [/rice/i,"🍚"],[/milk/i,"🥛"],[/bread|loaf/i,"🍞"],[/water/i,"💧"],[/juice/i,"🧃"],
+      [/coffee/i,"☕"],[/sugar|salt|flour/i,"🧂"],[/apple|fruit/i,"🍎"],[/veg|vegetable/i,"🥦"],
+      [/candy|choco|snack/i,"🍬"],[/tissue|paper/i,"🧻"]
+    ];
+    function emojiFor(name){ for(const [re,e] of EMOJI){ if(re.test(name)) return e; } return "🛒"; }
+
+    // ---------- parse itemlist.txt ----------
+    // format per line:  Name: price, "image.png"      ( # = comment )
+    function parseItems(text){
+      const out = [];
+      text.split(/\r?\n/).forEach(raw=>{
+        const line = raw.trim();
+        if(!line || line.startsWith("#")) return;
+        const m = line.match(/^(.+?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*"?([^"]*?)"?\s*$/);
+        if(!m) return;
+        out.push({ name:m[1].trim(), price:parseFloat(m[2]), image:m[3].trim() });
+      });
+      return out;
+    }
+
+    // ---------- state ----------
+    let items = [];
+    let qty = [];                 // qty[i] for items[i]
+    let budget = 0;
+    let liveOn = false;
+    let viewScene = "idle";       // what the view is currently showing
+    let budgetShown = false;
+    let nonce = 0;
+    let total = 0, count = 0;
+
+    // ---------- localStorage plumbing ----------
+    function readViewState(){
+      try{ return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; }catch(e){ return {}; }
+    }
+    function pushState(scene){
+      viewScene = scene;
+      localStorage.setItem(STATE_KEY, JSON.stringify({
+        scene: viewScene, budget: budget, total: total,
+        count: count, liveTotal: liveOn, nonce: nonce
+      }));
+    }
+    function saveControl(){
+      const qmap = {};
+      items.forEach((it,i)=>{ if(qty[i]) qmap[it.name] = qty[i]; });
+      localStorage.setItem(CONTROL_KEY, JSON.stringify({
+        qty:qmap, budget:budget, liveOn:liveOn
+      }));
+    }
+
+    // ---------- totals ----------
+    function recompute(){
+      total = 0; count = 0;
+      items.forEach((it,i)=>{ const q = qty[i]||0; total += q*it.price; count += q; });
+    }
+    function updateFooterTotals(){
+      totalVal.textContent = peso(total);
+      const meta = document.getElementById("totalMeta");
+      if(budget > 0){
+        const left = budget - total;
+        if(left < 0){ meta.textContent = "Over budget by " + peso(-left); meta.classList.add("over"); }
+        else { meta.textContent = peso(left) + " of " + peso(budget) + " left"; meta.classList.remove("over"); }
+      } else {
+        meta.textContent = "Set a budget to begin"; meta.classList.remove("over");
+      }
+    }
+
+    // called after any cart change
+    function afterChange(){
+      recompute();
+      updateFooterTotals();
+      saveControl();
+      // Live ON  -> reveal running total on the view.
+      // Live OFF -> keep the current scene, but still refresh the stored total
+      //             silently so a later "Calculate" uses the right number.
+      if(liveOn) pushState("live");
+      else pushState(viewScene);
+    }
+
+    // ---------- rows ----------
+    const rowsEl = document.getElementById("rows");
+    const qtyInputs = [], subEls = [], rowEls = [];
+
+    function buildRows(){
+      rowsEl.innerHTML = "";
+      qtyInputs.length = subEls.length = rowEls.length = 0;
+      if(!items.length){
+        rowsEl.innerHTML = '<div class="empty-note">No items found. Add lines to '+
+          '<code>itemlist.txt</code> like <code>Fish: 300, "fish.png"</code> and refresh.</div>';
+        document.getElementById("itemCount").textContent = "";
+        return;
+      }
+      document.getElementById("itemCount").textContent = items.length + " items loaded from itemlist.txt";
+
+      items.forEach((it,i)=>{
+        const row = document.createElement("div");
+        row.className = "item" + (qty[i] ? " active" : "");
+
+        const thumb = document.createElement("div");
+        thumb.className = "thumb";
+        thumb.textContent = emojiFor(it.name);           // fallback until image loads
+        if(it.image){
+          const img = new Image();
+          img.alt = it.name; img.loading = "lazy";
+          img.onload = ()=>{ thumb.textContent=""; thumb.appendChild(img); };
+          img.onerror = ()=>{};                          // keep emoji fallback
+          img.src = "img/" + encodeURIComponent(it.image);
+        }
+
+        const info = document.createElement("div");
+        info.className = "info";
+        const sub = qty[i] ? peso(qty[i]*it.price) : "";
+        info.innerHTML =
+          '<div class="nm"></div>'+
+          '<div class="pr">'+peso(it.price)+' each</div>'+
+          '<div class="sub"></div>';
+        info.querySelector(".nm").textContent = it.name;
+        const subEl = info.querySelector(".sub");
+        subEl.textContent = qty[i] ? (qty[i] + " × " + peso(it.price) + " = " + peso(qty[i]*it.price)) : "";
+
+        const stepper = document.createElement("div");
+        stepper.className = "stepper";
+        const minus = document.createElement("button");
+        minus.className = "step minus"; minus.type="button"; minus.textContent = "−";
+        minus.setAttribute("aria-label","Remove one "+it.name);
+        const input = document.createElement("input");
+        input.className = "qty"; input.type = "number"; input.min = "0"; input.step = "1";
+        input.value = qty[i] || 0; input.setAttribute("aria-label","Quantity of "+it.name);
+        const plus = document.createElement("button");
+        plus.className = "step plus"; plus.type="button"; plus.textContent = "+";
+        plus.setAttribute("aria-label","Add one "+it.name);
+
+        minus.addEventListener("click", ()=> setQty(i, (qty[i]||0) - 1));
+        plus .addEventListener("click", ()=> setQty(i, (qty[i]||0) + 1));
+        input.addEventListener("input", ()=>{
+          let v = parseInt(input.value,10);
+          if(isNaN(v) || v < 0) v = 0;
+          qty[i] = v;
+          refreshRow(i);
+          afterChange();
+        });
+        input.addEventListener("blur", ()=>{ input.value = qty[i]||0; });
+
+        stepper.append(minus, input, plus);
+        row.append(thumb, info, stepper);
+        rowsEl.appendChild(row);
+
+        qtyInputs[i] = input; subEls[i] = subEl; rowEls[i] = row;
+      });
+    }
+
+    function refreshRow(i){
+      const it = items[i], q = qty[i]||0;
+      subEls[i].textContent = q ? (q + " × " + peso(it.price) + " = " + peso(q*it.price)) : "";
+      rowEls[i].classList.toggle("active", q>0);
+    }
+    function setQty(i, val){
+      val = Math.max(0, Math.floor(val||0));
+      qty[i] = val;
+      qtyInputs[i].value = val;
+      refreshRow(i);
+      afterChange();
+    }
+
+    // ---------- footer controls ----------
+    const totalVal   = document.getElementById("totalVal");
+    const budgetInput= document.getElementById("budget");
+    const liveToggle = document.getElementById("liveToggle");
+    const liveState  = document.getElementById("liveState");
+
+    budgetInput.addEventListener("input", ()=>{
+      let b = parseFloat(budgetInput.value);
+      budget = (isNaN(b) || b < 0) ? 0 : b;
+      updateFooterTotals();
+      saveControl();
+      // If the view is currently showing budget/live, keep it in sync live.
+      if(viewScene === "live" || viewScene === "budget") pushState(viewScene);
+    });
+
+    document.getElementById("showBudget").addEventListener("click", ()=>{
+      budgetShown = true;
+      pushState("budget");
+      flash(document.getElementById("showBudget"));
+    });
+
+    liveToggle.addEventListener("change", ()=>{
+      liveOn = liveToggle.checked;
+      liveState.textContent = liveOn ? "On" : "Off";
+      saveControl();
+      if(liveOn){
+        pushState("live");                      // reveal running total now
+      } else {
+        // hide the number again: fall back to the budget reveal or idle
+        pushState(budgetShown ? "budget" : "idle");
+      }
+    });
+
+    document.getElementById("calc").addEventListener("click", ()=>{
+      recompute();
+      nonce = Date.now();                        // force the view to replay the count-up
+      pushState("result");
+      flash(document.getElementById("calc"));
+    });
+
+    document.getElementById("reset").addEventListener("click", ()=>{
+      if(count > 0 && !confirm("Reset all quantities and clear the view screen?")) return;
+      qty = items.map(()=>0);
+      budgetShown = false;
+      recompute();
+      buildRows();
+      updateFooterTotals();
+      saveControl();
+      pushState("idle");
+    });
+
+    document.getElementById("openView").addEventListener("click", ()=>{
+      window.open("view.html", "grocery-view");
+    });
+
+    function flash(btn){
+      btn.style.filter = "brightness(1.25)";
+      setTimeout(()=>{ btn.style.filter = ""; }, 160);
+    }
+
+    // ---------- header decor ----------
+    (function bunting(){
+      const el = document.getElementById("bunting");
+      const cols = ["var(--bpi-gold)","var(--cream)","var(--bpi-gold-lt)","#ffffff"];
+      for(let i=0;i<40;i++){ const f=document.createElement("i"); f.style.setProperty("--f",cols[i%cols.length]); el.appendChild(f); }
+    })();
+
+    // keep the item list clear of the fixed footer, whatever its height
+    (function trackFooter(){
+      const footer = document.querySelector("footer");
+      const apply = ()=> document.documentElement.style.setProperty("--footer-h", footer.offsetHeight + "px");
+      if(window.ResizeObserver){ new ResizeObserver(apply).observe(footer); }
+      window.addEventListener("resize", apply); apply();
+    })();
+
+    // ---------- boot ----------
+    function restoreControl(){
+      let saved = {};
+      try{ saved = JSON.parse(localStorage.getItem(CONTROL_KEY)) || {}; }catch(e){}
+      budget = Number(saved.budget) || 0;
+      liveOn = !!saved.liveOn;
+      const qmap = saved.qty || {};
+      qty = items.map(it => Number(qmap[it.name]) || 0);
+
+      // reflect any existing view state so our internal notion matches the screen
+      const vs = readViewState();
+      viewScene = vs.scene || "idle";
+      nonce = vs.nonce || 0;
+      budgetShown = (viewScene === "budget" || viewScene === "live" || viewScene === "result");
+
+      budgetInput.value = budget ? budget : "";
+      liveToggle.checked = liveOn;
+      liveState.textContent = liveOn ? "On" : "Off";
+    }
+
+    fetch("itemlist.txt", {cache:"no-store"})
+      .then(r => r.ok ? r.text() : Promise.reject(r.status))
+      .then(txt => { items = parseItems(txt); })
+      .catch(()=>{ items = []; })
+      .finally(()=>{
+        restoreControl();
+        buildRows();
+        recompute();
+        updateFooterTotals();
+        // Do NOT clobber the view on load — leave whatever it is showing.
+      });
+
+    // if a second control tab edits things, stay roughly in sync
+    window.addEventListener("storage", (e)=>{
+      if(e.key === CONTROL_KEY){ restoreControl(); buildRows(); recompute(); updateFooterTotals(); }
+    });
+  })();
+  </script>
+</body>
+</html>

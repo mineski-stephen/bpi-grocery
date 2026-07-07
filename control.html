@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control</title>
+<style>
+  :root {
+    --bg: #0e1013;
+    --panel: #16191f;
+    --panel-2: #1c2028;
+    --line: #2a2f39;
+    --text: #e8e6e1;
+    --muted: #868c98;
+    --accent: #ff9e2c;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: clamp(1rem, 4vw, 3rem);
+    line-height: 1.5;
+  }
+  .console {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+  }
+
+  /* Header + status */
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    transition: color 0.2s;
+  }
+  .status.live { color: var(--accent); }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.2s;
+  }
+  .dot.live {
+    background: var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,158,44,0.45); }
+    70%  { box-shadow: 0 0 0 7px rgba(255,158,44,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,158,44,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot.live { animation: none; }
+  }
+
+  /* Message field */
+  .field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+  }
+  textarea {
+    width: 100%;
+    min-height: 130px;
+    resize: vertical;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    font-family: var(--sans);
+    font-size: 1.05rem;
+    line-height: 1.45;
+  }
+  textarea::placeholder { color: var(--muted); }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,158,44,0.15);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .count { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+  .actions { display: flex; gap: 0.6rem; }
+
+  button, .btn {
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  button:focus-visible, .btn:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,158,44,0.15);
+  }
+  .btn-primary { background: var(--accent); color: #1a1206; border-color: var(--accent); }
+  .btn-primary:hover { background: #ffab48; border-color: #ffab48; }
+
+  /* Preview monitor (mirrors the Display) */
+  .preview .plabel {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+  }
+  .monitor {
+    background: #0b0c0e;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    aspect-ratio: 16 / 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+    text-align: center;
+    overflow: hidden;
+  }
+  .ptext {
+    font-size: clamp(1.1rem, 4.5vw, 2.2rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    color: #f2efe9;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .ptext.empty {
+    font-size: clamp(0.8rem, 2.5vw, 1rem);
+    font-weight: 500;
+    color: #4a4d55;
+    letter-spacing: 0.02em;
+  }
+</style>
+</head>
+<body>
+  <main class="console">
+    <header class="top">
+      <span class="brand">Signage&nbsp;·&nbsp;Control</span>
+      <span class="status" id="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Standby</span>
+      </span>
+    </header>
+
+    <section class="field">
+      <label for="msg">Message</label>
+      <textarea id="msg" placeholder="Type here — the display updates as you type…" autofocus></textarea>
+      <div class="row">
+        <span class="count" id="count">0 characters</span>
+        <div class="actions">
+          <button id="clear" type="button">Clear</button>
+          <a class="btn btn-primary" href="display.html" target="_blank" rel="noopener">Open display ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="preview">
+      <div class="plabel">Preview</div>
+      <div class="monitor">
+        <div class="ptext empty" id="preview">Nothing on screen</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const KEY = "signage.message";
+    const input = document.getElementById("msg");
+    const count = document.getElementById("count");
+    const preview = document.getElementById("preview");
+    const clearBtn = document.getElementById("clear");
+    const status = document.getElementById("status");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+
+    function paint(text) {
+      const live = !!(text && text.trim() !== "");
+
+      // Live preview of what the Display shows
+      preview.textContent = live ? text : "Nothing on screen";
+      preview.classList.toggle("empty", !live);
+
+      // Character count (singular/plural)
+      count.textContent = text.length + (text.length === 1 ? " character" : " characters");
+
+      // On-air status reflects whether anything is actually showing
+      status.classList.toggle("live", live);
+      statusDot.classList.toggle("live", live);
+      statusText.textContent = live ? "On air" : "Standby";
+    }
+
+    function commit(text) {
+      // This single line is the whole mechanism: write to localStorage, and
+      // any open Display on the same origin gets a 'storage' event and updates.
+      localStorage.setItem(KEY, text);
+      paint(text);
+    }
+
+    // Load whatever was last set so the console reflects the current state.
+    const existing = localStorage.getItem(KEY) || "";
+    input.value = existing;
+    paint(existing);
+
+    input.addEventListener("input", () => commit(input.value));
+
+    clearBtn.addEventListener("click", () => {
+      input.value = "";
+      commit("");
+      input.focus();
+    });
+
+    // If a second Control tab is open, keep this one in sync with it.
+    window.addEventListener("storage", (e) => {
+      if (e.key === KEY) {
+        input.value = e.newValue || "";
+        paint(input.value);
+      }
+    });
+  </script>
+</body>
+</html>

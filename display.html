@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Display</title>
+<style>
+  :root {
+    --bg: #0b0c0e;
+    --text: #f2efe9;
+    --muted: #4a4d55;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 6vmin;
+    text-align: center;
+    overflow: hidden;
+  }
+  #message {
+    font-size: clamp(2.5rem, 9vw, 10rem);
+    font-weight: 800;
+    line-height: 1.03;
+    letter-spacing: -0.02em;
+    max-width: 24ch;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  #message.empty {
+    font-size: clamp(1rem, 3vw, 1.75rem);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div id="message" class="empty">Waiting for a message…</div>
+
+  <script>
+    const KEY = "signage.message";
+    const el = document.getElementById("message");
+
+    function render() {
+      const text = localStorage.getItem(KEY);
+      if (text && text.trim() !== "") {
+        el.textContent = text;
+        el.classList.remove("empty");
+      } else {
+        el.textContent = "Waiting for a message…";
+        el.classList.add("empty");
+      }
+    }
+
+    // Show whatever is already stored the moment this page opens.
+    render();
+
+    // The 'storage' event fires in THIS tab whenever ANOTHER tab/window on the
+    // same origin changes localStorage. That's how the Control page pushes
+    // updates here live, with no server round-trip and no polling.
+    window.addEventListener("storage", (e) => {
+      if (e.key === KEY || e.key === null) render();
+    });
+  </script>
+</body>
+</html>

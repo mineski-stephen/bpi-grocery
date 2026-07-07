@@ -1,0 +1,23 @@
+# ============================================================
+#  BPI GROCERY CHALLENGE — ITEM LIST
+#  Edit this file to change what appears on the shelf, then
+#  just refresh the Control page in the browser.
+#
+#  One item per line, in this exact format:
+#
+#      Item Name: price, "image-file.png"
+#
+#  - price is in pesos, numbers only (no ₱ sign, no commas)
+#  - the image file lives in the  img/  folder
+#  - lines starting with  #  are ignored (like this one)
+# ============================================================
+Fish: 300, "fish.png"
+Instant Noodles: 25, "instant noodles.png"
+Diaper: 375, "diaper.png"
+Cooking Oil: 70, "cooking oil.png"
+Cereal: 55, "cereal.png"
+Hotdog: 300, "hotdog.png"
+Eggs: 150, "eggs.png"
+Detergent: 350, "detergent.png"
+Corned Beef: 220, "corned beef.png"
+Chicken: 250, "chicken.png"

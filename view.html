@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BPI Grocery Challenge — View</title>
+<!--
+  VIEW SCREEN (the "display")
+  ---------------------------
+  This page is what the audience / contestant sees on the big screen.
+  It renders itself entirely from one value in localStorage:
+
+      key:  "grocery.state"
+      value (JSON):
+        {
+          scene:     "idle" | "budget" | "live" | "result",
+          budget:    number,      // peso budget for the round
+          total:     number,      // current cart total
+          count:     number,      // how many items are in the cart
+          liveTotal: boolean,     // is the live-total toggle on
+          nonce:     number        // bumped each time "Calculate" is pressed
+        }
+
+  The control page (index.html) writes that value. Because both pages are
+  served from the same origin, THIS page receives a 'storage' event whenever
+  the control writes — no server round-trip, no polling. The same mechanism
+  drives the small "mini view" iframe embedded in the control page.
+-->
+<style>
+  :root{
+    /* --- BPI brand ------------------------------------------------ */
+    --bpi-red:      #A6192E;
+    --bpi-red-dk:   #7C0E20;
+    --bpi-red-dker: #520712;
+    --bpi-gold:     #F6B60E;
+    --bpi-gold-lt:  #FFD65A;
+    --cream:        #FFF7E9;
+    --cream-2:      #FBEFD6;
+    --ink:          #2A0E12;
+    /* --- verdict palette ----------------------------------------- */
+    --good:  #23A85A;   --good-dk:#137a3d;
+    --over:  #E23A2E;   --over-dk:#a81d13;
+    --under: #2C9BD6;   --under-dk:#1c6f9c;
+
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    --pop: "Arial Black", "Segoe UI", var(--sans);
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    font-family:var(--sans);
+    color:var(--cream);
+    background:
+      radial-gradient(120% 90% at 50% -10%, #b21e35 0%, var(--bpi-red) 34%, var(--bpi-red-dk) 68%, var(--bpi-red-dker) 100%);
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    position:relative;
+  }
+
+  /* radial "big top" ceiling stripes behind everything */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:
+      repeating-conic-gradient(from 0deg at 50% -8%,
+        rgba(255,255,255,.055) 0deg 6deg,
+        rgba(0,0,0,0)          6deg 12deg);
+    pointer-events:none;
+    z-index:0;
+  }
+  /* soft spotlight glow */
+  body::after{
+    content:"";
+    position:fixed; inset:0;
+    background:radial-gradient(60% 55% at 50% 42%, rgba(255,214,90,.20), transparent 70%);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  /* twinkling stars layer */
+  .stars{ position:fixed; inset:0; z-index:1; pointer-events:none; }
+  .stars b{
+    position:absolute;
+    color:var(--bpi-gold-lt);
+    text-shadow:0 0 10px rgba(255,214,90,.8);
+    animation:twinkle 3.4s ease-in-out infinite;
+    opacity:.0;
+    user-select:none;
+  }
+  @keyframes twinkle{ 0%,100%{ opacity:.15; transform:scale(.85);} 50%{ opacity:.95; transform:scale(1.15);} }
+
+  /* ---------- bunting (pennant flags) ---------- */
+  .bunting{
+    position:fixed; top:0; left:0; right:0;
+    height:46px;
+    display:flex; align-items:flex-start;
+    z-index:3;
+    filter:drop-shadow(0 4px 6px rgba(0,0,0,.28));
+  }
+  .bunting::before{
+    content:""; position:absolute; top:6px; left:0; right:0; height:3px;
+    background:rgba(0,0,0,.25); border-radius:3px;
+  }
+  .bunting i{
+    flex:1 1 auto;
+    height:0; width:0;
+    border-left:  min(3.6vw,34px) solid transparent;
+    border-right: min(3.6vw,34px) solid transparent;
+    border-top:   min(4.4vw,40px) solid var(--f);
+  }
+
+  /* ---------- centre stage card ---------- */
+  .stage{
+    position:relative; z-index:2;
+    width:min(90vw, 1120px);
+    margin:0 3vmin;
+  }
+  .card{
+    position:relative;
+    background:linear-gradient(180deg, var(--cream) 0%, var(--cream-2) 100%);
+    color:var(--ink);
+    border-radius:26px;
+    padding:clamp(2rem, 6vmin, 4.5rem) clamp(1.5rem, 6vmin, 4rem);
+    box-shadow:
+      0 30px 70px rgba(0,0,0,.45),
+      inset 0 0 0 3px rgba(166,25,46,.12);
+    text-align:center;
+    overflow:hidden;
+    min-height:min(64vh, 620px);
+    display:flex; align-items:center; justify-content:center;
+  }
+  /* striped top ribbon on the card */
+  .card::after{
+    content:""; position:absolute; top:0; left:0; right:0; height:14px;
+    background:repeating-linear-gradient(45deg,
+      var(--bpi-red) 0 16px, var(--cream) 16px 32px);
+    opacity:.9;
+  }
+  /* marquee bulbs framing the card */
+  .card .lights{
+    position:absolute; inset:9px; border-radius:20px;
+    pointer-events:none;
+    background:
+      radial-gradient(circle, var(--bpi-gold-lt) 0 2.6px, rgba(246,182,14,.35) 3px, transparent 3.6px) left 2px  top    0 / 30px 30px repeat-x,
+      radial-gradient(circle, var(--bpi-gold-lt) 0 2.6px, rgba(246,182,14,.35) 3px, transparent 3.6px) left 2px  bottom 0 / 30px 30px repeat-x,
+      radial-gradient(circle, var(--bpi-gold-lt) 0 2.6px, rgba(246,182,14,.35) 3px, transparent 3.6px) left 0    top 2px  / 30px 30px repeat-y,
+      radial-gradient(circle, var(--bpi-gold-lt) 0 2.6px, rgba(246,182,14,.35) 3px, transparent 3.6px) right 0   top 2px  / 30px 30px repeat-y;
+    animation:bulbs 1.5s steps(1) infinite;
+  }
+  @keyframes bulbs{ 0%,100%{ filter:brightness(1);} 50%{ filter:brightness(.6);} }
+
+  /* BPI diamond brand chip */
+  .brand{
+    position:absolute; top:22px; left:22px; z-index:4;
+    width:54px; height:54px;
+    display:grid; place-items:center;
+    background:var(--bpi-red);
+    color:#fff;
+    transform:rotate(45deg);
+    border-radius:10px;
+    box-shadow:0 6px 14px rgba(0,0,0,.3), inset 0 0 0 2px var(--bpi-gold);
+  }
+  .brand span{ transform:rotate(-45deg); font-family:var(--pop); font-size:1.05rem; letter-spacing:.04em; }
+
+  /* ---------- scenes ---------- */
+  .scene{ display:none; width:100%; animation:pop .5s cubic-bezier(.2,.9,.3,1.4) both; }
+  .scene.show{ display:block; }
+  @keyframes pop{ 0%{ opacity:0; transform:scale(.9) translateY(14px);} 100%{ opacity:1; transform:none; } }
+
+  .eyebrow{
+    font-family:var(--pop);
+    text-transform:uppercase;
+    letter-spacing:.22em;
+    color:var(--bpi-red);
+    font-size:clamp(.9rem, 2.4vmin, 1.5rem);
+    margin-bottom:.6rem;
+  }
+  .headline{
+    font-family:var(--pop);
+    text-transform:uppercase;
+    line-height:.95;
+    color:var(--bpi-red);
+    letter-spacing:.01em;
+    font-size:clamp(2.4rem, 8.5vmin, 6.5rem);
+    text-shadow:2px 3px 0 var(--bpi-gold), 5px 7px 0 rgba(0,0,0,.12);
+  }
+  .sub{
+    margin-top:1rem;
+    font-size:clamp(1rem, 3vmin, 1.9rem);
+    color:var(--ink);
+    font-weight:600;
+    opacity:.85;
+  }
+
+  /* big money figure */
+  .amount{
+    font-family:var(--pop);
+    color:var(--bpi-red);
+    line-height:1;
+    font-size:clamp(3.6rem, 17vmin, 12rem);
+    letter-spacing:-.01em;
+    text-shadow:3px 4px 0 var(--bpi-gold-lt), 7px 9px 0 rgba(0,0,0,.10);
+  }
+
+  /* budget/remaining meta line */
+  .meta{
+    margin-top:1.4rem;
+    display:inline-flex; flex-wrap:wrap; gap:.6rem 1.4rem; justify-content:center;
+    font-size:clamp(.95rem, 2.6vmin, 1.6rem); font-weight:700;
+  }
+  .meta .pill{
+    background:var(--bpi-red); color:var(--cream);
+    padding:.35em .9em; border-radius:999px;
+    box-shadow:0 4px 0 var(--bpi-red-dk);
+  }
+  .meta .pill.gold{ background:var(--bpi-gold); color:var(--ink); box-shadow:0 4px 0 #c98f00; }
+  .meta .pill.over{ background:var(--over); box-shadow:0 4px 0 var(--over-dk); color:#fff; }
+
+  /* progress meter (live scene) */
+  .meter{
+    margin:1.8rem auto 0;
+    width:min(90%, 640px);
+    height:26px;
+    background:#eadfca;
+    border-radius:999px;
+    overflow:hidden;
+    box-shadow:inset 0 2px 5px rgba(0,0,0,.18);
+    position:relative;
+  }
+  .meter i{
+    display:block; height:100%; width:0%;
+    background:linear-gradient(90deg, var(--good), #3ad07a);
+    border-radius:999px;
+    transition:width .45s cubic-bezier(.3,.9,.3,1), background .3s;
+  }
+  .meter.warn i{ background:linear-gradient(90deg, var(--bpi-gold), #ffcf4d); }
+  .meter.over i{ background:linear-gradient(90deg, var(--over), #ff6f5e); }
+
+  /* ---------- verdict banner (result scene) ---------- */
+  .verdict{
+    margin-top:1.6rem;
+    display:none;
+    font-family:var(--pop);
+    text-transform:uppercase;
+    letter-spacing:.02em;
+    font-size:clamp(2.2rem, 8vmin, 5.6rem);
+    line-height:1;
+    padding:.4em .7em;
+    border-radius:18px;
+    color:#fff;
+  }
+  .verdict.show{ display:inline-block; animation:slam .6s cubic-bezier(.2,.8,.2,1.6) both; }
+  @keyframes slam{ 0%{ opacity:0; transform:scale(2.2) rotate(-4deg);} 60%{ opacity:1;} 100%{ opacity:1; transform:none; } }
+  .verdict small{ display:block; font-family:var(--sans); font-weight:700; font-size:.32em; letter-spacing:.04em; margin-top:.5em; opacity:.95; }
+  .verdict.v-within{ background:linear-gradient(180deg,var(--good),var(--good-dk)); box-shadow:0 12px 0 rgba(0,0,0,.15), 0 0 0 5px var(--bpi-gold-lt); }
+  .verdict.v-over{   background:linear-gradient(180deg,var(--over),var(--over-dk));  box-shadow:0 12px 0 rgba(0,0,0,.15), 0 0 0 5px #ffd0cb; }
+  .verdict.v-under{  background:linear-gradient(180deg,var(--under),var(--under-dk));box-shadow:0 12px 0 rgba(0,0,0,.15), 0 0 0 5px #bfe6fa; }
+
+  /* over-budget attention shake */
+  .card.shake{ animation:shake .5s ease-in-out 1; }
+  @keyframes shake{ 0%,100%{ transform:translateX(0);} 20%{transform:translateX(-10px) rotate(-.4deg);} 40%{transform:translateX(9px) rotate(.4deg);} 60%{transform:translateX(-7px);} 80%{transform:translateX(5px);} }
+
+  /* ---------- confetti ---------- */
+  .confetti{ position:fixed; inset:0; z-index:6; pointer-events:none; overflow:hidden; }
+  .confetti i{
+    position:absolute; top:-8vh;
+    width:12px; height:16px; border-radius:2px;
+    opacity:.95;
+    animation:fall linear forwards;
+  }
+  @keyframes fall{
+    0%{ transform:translateY(-10vh) rotate(0deg); opacity:1; }
+    100%{ transform:translateY(112vh) rotate(720deg); opacity:.9; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .stars b,.card .lights,.scene,.verdict.show,.card.shake,.confetti i{ animation:none !important; }
+    .scene{ display:none; } .scene.show{ display:block; }
+  }
+</style>
+</head>
+<body>
+  <div class="stars" id="stars" aria-hidden="true"></div>
+  <div class="bunting" id="bunting" aria-hidden="true"></div>
+
+  <main class="stage">
+    <section class="card" id="card">
+      <div class="lights" aria-hidden="true"></div>
+      <div class="brand" aria-hidden="true"><span>BPI</span></div>
+
+      <!-- IDLE -->
+      <div class="scene show" id="scene-idle">
+        <div class="eyebrow">🎪 Welcome to the 🎪</div>
+        <h1 class="headline">BPI<br>Grocery<br>Challenge</h1>
+        <p class="sub">Grab the best cart you can — get ready!</p>
+      </div>
+
+      <!-- BUDGET -->
+      <div class="scene" id="scene-budget">
+        <div class="eyebrow">Your Budget</div>
+        <div class="amount" id="budgetAmt">₱0</div>
+        <p class="sub">Spend it wisely… shop smart! 🛒</p>
+      </div>
+
+      <!-- LIVE TOTAL -->
+      <div class="scene" id="scene-live">
+        <div class="eyebrow">Running Total</div>
+        <div class="amount" id="liveAmt">₱0</div>
+        <div class="meter" id="liveMeter"><i></i></div>
+        <div class="meta" id="liveMeta"></div>
+      </div>
+
+      <!-- RESULT / CALCULATE -->
+      <div class="scene" id="scene-result">
+        <div class="eyebrow" id="resultEyebrow">Your Cart</div>
+        <div class="amount" id="resultAmt">₱0</div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="confetti" id="confetti" aria-hidden="true"></div>
+
+  <script>
+  (function(){
+    "use strict";
+    const STATE_KEY = "grocery.state";
+
+    // ---- helpers -------------------------------------------------
+    function peso(n){
+      const r = Math.round((Number(n)||0) * 100) / 100;
+      const hasDec = Math.abs(r % 1) > 0.0001;
+      return "₱" + r.toLocaleString("en-PH", {
+        minimumFractionDigits: hasDec ? 2 : 0,
+        maximumFractionDigits: 2
+      });
+    }
+    function readState(){
+      try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; }
+      catch(e){ return {}; }
+    }
+    // total < 50% budget -> under, total > budget -> over, else within
+    function classify(total, budget){
+      if(!(budget > 0)) return "within";        // no budget set -> neutral
+      if(total > budget) return "over";
+      if(total < 0.5 * budget) return "under";
+      return "within";
+    }
+
+    // ---- decorative: stars + bunting ----------------------------
+    (function buildDecor(){
+      const stars = document.getElementById("stars");
+      const glyphs = ["★","✦","✧","❈","✺"];
+      for(let i=0;i<26;i++){
+        const b = document.createElement("b");
+        b.textContent = glyphs[i % glyphs.length];
+        b.style.left = (Math.random()*100).toFixed(2) + "%";
+        b.style.top  = (Math.random()*100).toFixed(2) + "%";
+        b.style.fontSize = (Math.random()*22 + 10).toFixed(0) + "px";
+        b.style.animationDelay = (Math.random()*3.4).toFixed(2) + "s";
+        stars.appendChild(b);
+      }
+      const bunting = document.getElementById("bunting");
+      const cols = ["var(--bpi-gold)","var(--cream)","var(--bpi-gold-lt)","#ffffff"];
+      for(let i=0;i<26;i++){
+        const f = document.createElement("i");
+        f.style.setProperty("--f", cols[i % cols.length]);
+        bunting.appendChild(f);
+      }
+    })();
+
+    // ---- confetti burst -----------------------------------------
+    let confettiTimer = null;
+    function burstConfetti(){
+      const layer = document.getElementById("confetti");
+      layer.innerHTML = "";
+      const cols = ["#F6B60E","#FFD65A","#A6192E","#ffffff","#23A85A","#2C9BD6"];
+      for(let i=0;i<90;i++){
+        const c = document.createElement("i");
+        c.style.left = (Math.random()*100).toFixed(2) + "%";
+        c.style.background = cols[Math.floor(Math.random()*cols.length)];
+        c.style.animationDuration = (Math.random()*1.8 + 2.2).toFixed(2) + "s";
+        c.style.animationDelay = (Math.random()*0.6).toFixed(2) + "s";
+        const w = (Math.random()*8 + 8).toFixed(0);
+        c.style.width = w + "px";
+        c.style.height = (Math.random()*10 + 8).toFixed(0) + "px";
+        if(Math.random() < .3) c.style.borderRadius = "50%";
+        layer.appendChild(c);
+      }
+      clearTimeout(confettiTimer);
+      confettiTimer = setTimeout(() => { layer.innerHTML = ""; }, 5200);
+    }
+
+    // ---- count-up animation -------------------------------------
+    let rafId = null;
+    function animateCount(from, to, el, done){
+      cancelAnimationFrame(rafId);
+      const dur = Math.min(2600, Math.max(1400, Math.abs(to) * 4));
+      const t0 = performance.now();
+      function frame(now){
+        const t = Math.min(1, (now - t0) / dur);
+        const eased = 1 - Math.pow(1 - t, 3);           // easeOutCubic
+        el.textContent = peso(from + (to - from) * eased);
+        if(t < 1){ rafId = requestAnimationFrame(frame); }
+        else { el.textContent = peso(to); if(done) done(); }
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
+    // ---- scene switching ----------------------------------------
+    const scenes = {
+      idle:   document.getElementById("scene-idle"),
+      budget: document.getElementById("scene-budget"),
+      live:   document.getElementById("scene-live"),
+      result: document.getElementById("scene-result")
+    };
+    function showScene(name){
+      Object.keys(scenes).forEach(k=>{
+        scenes[k].classList.toggle("show", k === name);
+      });
+    }
+
+    // ---- element refs -------------------------------------------
+    const card        = document.getElementById("card");
+    const budgetAmt   = document.getElementById("budgetAmt");
+    const liveAmt     = document.getElementById("liveAmt");
+    const liveMeter   = document.getElementById("liveMeter");
+    const liveMeta    = document.getElementById("liveMeta");
+    const resultAmt   = document.getElementById("resultAmt");
+    const resultEyebrow = document.getElementById("resultEyebrow");
+    const verdictEl   = document.getElementById("verdict");
+
+    const VERDICT_TEXT = {
+      within: { title:"WITHIN BUDGET!", sub:"Nicely played — right on the money! 🎉", cls:"v-within" },
+      over:   { title:"OVERBUDGET!",    sub:"Uh oh — time to put something back! 😅", cls:"v-over"  },
+      under:  { title:"UNDERBUDGET!",   sub:"Money to spare — you played it safe! 💰", cls:"v-under" }
+    };
+
+    function renderLive(s){
+      liveAmt.textContent = peso(s.total);
+      liveMeter.classList.remove("warn","over");
+      const bar = liveMeter.querySelector("i");
+      liveMeta.innerHTML = "";
+      if(s.budget > 0){
+        const pct = Math.min(100, (s.total / s.budget) * 100);
+        bar.style.width = pct + "%";
+        if(s.total > s.budget) liveMeter.classList.add("over");
+        else if(s.total >= 0.5 * s.budget) liveMeter.classList.add("warn");
+        const left = s.budget - s.total;
+        const bpill = document.createElement("span");
+        bpill.className = "pill gold";
+        bpill.textContent = "Budget " + peso(s.budget);
+        const rpill = document.createElement("span");
+        rpill.className = "pill" + (left < 0 ? " over" : "");
+        rpill.textContent = left < 0 ? ("Over by " + peso(-left)) : (peso(left) + " left");
+        liveMeta.appendChild(bpill);
+        liveMeta.appendChild(rpill);
+      } else {
+        bar.style.width = "0%";
+      }
+      if(s.count > 0){
+        const cpill = document.createElement("span");
+        cpill.className = "pill";
+        cpill.textContent = s.count + (s.count === 1 ? " item" : " items");
+        liveMeta.appendChild(cpill);
+      }
+    }
+
+    function playResult(s){
+      resultEyebrow.innerHTML = "Your Cart" + (s.count > 0
+        ? ' &middot; <span style="color:var(--ink);opacity:.7">' + s.count + (s.count===1?" item":" items") + '</span>'
+        : "");
+      verdictEl.className = "verdict";          // hide + reset
+      verdictEl.innerHTML = "";
+      card.classList.remove("shake");
+      animateCount(0, Number(s.total)||0, resultAmt, function(){
+        const v = classify(Number(s.total)||0, Number(s.budget)||0);
+        const info = VERDICT_TEXT[v];
+        verdictEl.className = "verdict show " + info.cls;
+        verdictEl.innerHTML = info.title + "<small>" + info.sub + "</small>";
+        if(v === "within" || v === "under") burstConfetti();
+        if(v === "over"){ card.classList.add("shake"); }
+      });
+    }
+
+    // ---- master render ------------------------------------------
+    let lastNonce = null;
+    function render(){
+      const s = readState();
+      const scene = s.scene || "idle";
+
+      if(scene === "budget"){
+        budgetAmt.textContent = peso(s.budget);
+      } else if(scene === "live"){
+        renderLive(s);
+      } else if(scene === "result"){
+        // only (re)play the count-up when the nonce changes, so a stray
+        // re-render (e.g. window focus) doesn't restart the animation.
+        if(s.nonce !== lastNonce){
+          lastNonce = s.nonce;
+          showScene("result");
+          playResult(s);
+          return;
+        }
+      }
+      if(scene !== "result") lastNonce = null;
+      showScene(scene);
+    }
+
+    // initial paint + live updates from the control page
+    render();
+    window.addEventListener("storage", function(e){
+      if(e.key === STATE_KEY || e.key === null) render();
+    });
+  })();
+  </script>
+</body>
+</html>
