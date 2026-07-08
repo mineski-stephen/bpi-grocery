@@ -276,6 +276,58 @@
     100%{ transform:translateY(112vh) rotate(720deg); opacity:.9; }
   }
 
+  /* ---------- item image FX (add fly-in / count-up montage) ---------- */
+  .itemfx{ position:fixed; inset:0; z-index:5; pointer-events:none; overflow:hidden; }
+  .fx-fly, .fx-pop{
+    position:absolute; left:50%;
+    display:flex; flex-direction:column; align-items:center; gap:.55rem;
+    will-change:transform, opacity;
+  }
+  .fx-fly img, .fx-pop img{
+    width:100%; height:auto; object-fit:contain;
+    filter:drop-shadow(0 16px 30px rgba(0,0,0,.45));
+  }
+  .fx-tag{
+    font-family:var(--pop); font-weight:800;
+    color:#fff; background:var(--bpi-red);
+    padding:.28em .9em; border-radius:999px;
+    box-shadow:0 5px 0 var(--bpi-red-dk);
+    font-size:clamp(1rem, 2.8vmin, 1.7rem);
+    text-transform:uppercase; letter-spacing:.02em;
+    white-space:nowrap;
+  }
+
+  /* Live ON — a just-added item slides up from the bottom, fading in then out */
+  .fx-fly{
+    bottom:0;
+    width:min(38vh, 340px);
+    transform:translate(-50%, 42vh);
+    animation:fxFly 1.3s cubic-bezier(.2,.7,.25,1) forwards;
+  }
+  .fx-fly img{ max-height:min(38vh, 340px); }
+  @keyframes fxFly{
+    0%  { opacity:0; transform:translate(-50%, 42vh)  scale(.7);  }
+    16% { opacity:1; }
+    42% {            transform:translate(-50%, -14vh) scale(1.06); }
+    60% { opacity:1; transform:translate(-50%, -18vh) scale(1);   }
+    100%{ opacity:0; transform:translate(-50%, -56vh) scale(.95); }
+  }
+
+  /* Live OFF — quick item-by-item montage during the count-up */
+  .fx-pop{
+    top:62%;
+    width:min(26vh, 230px);
+    transform:translate(-50%, -50%);
+    animation:fxPop var(--fxdur, 520ms) ease-out forwards;
+  }
+  .fx-pop img{ max-height:min(26vh, 230px); }
+  @keyframes fxPop{
+    0%  { opacity:0; transform:translate(-50%, -50%) scale(.5)  rotate(-7deg); }
+    28% { opacity:1; transform:translate(-50%, -50%) scale(1.08) rotate(0deg); }
+    58% { opacity:1; transform:translate(-50%, -50%) scale(1); }
+    100%{ opacity:0; transform:translate(-50%, -78%) scale(.9); }
+  }
+
   @media (prefers-reduced-motion: reduce){
     .stars b,.card .lights,.scene,.verdict.show,.card.shake,.confetti i{ animation:none !important; }
     .scene{ display:none; } .scene.show{ display:block; }
@@ -322,6 +374,7 @@
     </section>
   </main>
 
+  <div class="itemfx" id="itemFx" aria-hidden="true"></div>
   <div class="confetti" id="confetti" aria-hidden="true"></div>
 
   <script>
@@ -396,9 +449,10 @@
 
     // ---- count-up animation -------------------------------------
     let rafId = null;
-    function animateCount(from, to, el, done){
+    function countupDuration(to){ return Math.min(2600, Math.max(1400, Math.abs(to) * 4)); }
+    function animateCount(from, to, el, dur, done){
       cancelAnimationFrame(rafId);
-      const dur = Math.min(2600, Math.max(1400, Math.abs(to) * 4));
+      dur = dur || countupDuration(to);
       const t0 = performance.now();
       function frame(now){
         const t = Math.min(1, (now - t0) / dur);
@@ -408,6 +462,66 @@
         else { el.textContent = peso(to); if(done) done(); }
       }
       rafId = requestAnimationFrame(frame);
+    }
+
+    // ---- item image FX ------------------------------------------
+    // Live ON  : the item just added flies up from the bottom (fade in→out).
+    // Live OFF : a quick item-by-item montage plays while the total counts up.
+    const REDUCE = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    const fxLayer = document.getElementById("itemFx");
+    let lastAddSeq = null;
+    let firstPaint = true;
+
+    function spawnFx(item, cls, durMs, withTag){
+      const wrap = document.createElement("div");
+      wrap.className = cls;
+      if(durMs) wrap.style.setProperty("--fxdur", durMs + "ms");
+      const img = new Image();               // eager load — lazy would never fire here
+      img.alt = item.name || "";
+      img.src = "img/" + encodeURIComponent(item.image || "");
+      wrap.appendChild(img);
+      if(withTag && item.name){
+        const tag = document.createElement("span");
+        tag.className = "fx-tag";
+        tag.textContent = item.name;
+        wrap.appendChild(tag);
+      }
+      fxLayer.appendChild(wrap);
+      const kill = ()=>{ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); };
+      wrap.addEventListener("animationend", kill);
+      setTimeout(kill, (durMs || 1300) + 500);   // fallback cleanup
+    }
+
+    function handleFly(s){
+      const seq = (s.lastAdd && typeof s.lastAdd.seq === "number") ? s.lastAdd.seq : null;
+      if(firstPaint){ lastAddSeq = seq; return; }   // don't replay a stale add on load
+      if(seq === null || seq === lastAddSeq) return;
+      lastAddSeq = seq;
+      if(REDUCE) return;
+      if((s.scene || "idle") === "live" && s.lastAdd.image){
+        spawnFx(s.lastAdd, "fx-fly", 1300, true);
+      }
+    }
+
+    let montageTimers = [];
+    function clearMontage(){
+      montageTimers.forEach(clearTimeout);
+      montageTimers = [];
+      fxLayer.querySelectorAll(".fx-pop").forEach(function(el){ el.remove(); });
+    }
+    function playMontage(cart, dur){
+      clearMontage();
+      if(REDUCE) return;
+      const list = (cart || []).filter(function(c){ return c && c.qty > 0 && c.image; });
+      if(!list.length) return;
+      const start = 140;                             // small lead-in
+      const span  = Math.max(500, dur - 350);        // wrap up just before the count does
+      const step  = span / list.length;
+      const life  = Math.min(720, Math.max(360, step * 1.7));
+      list.forEach(function(c, idx){
+        const t = setTimeout(function(){ spawnFx(c, "fx-pop", life, false); }, start + idx * step);
+        montageTimers.push(t);
+      });
     }
 
     // ---- scene switching ----------------------------------------
@@ -476,7 +590,11 @@
       verdictEl.className = "verdict";          // hide + reset
       verdictEl.innerHTML = "";
       card.classList.remove("shake");
-      animateCount(0, Number(s.total)||0, resultAmt, function(){
+      const dur = countupDuration(Number(s.total)||0);
+      // Live OFF: reveal the cart item-by-item as the total counts up.
+      // (Live ON already showed each item fly in the moment it was added.)
+      if(!s.liveTotal) playMontage(s.cart || [], dur);
+      animateCount(0, Number(s.total)||0, resultAmt, dur, function(){
         const v = classify(Number(s.total)||0, Number(s.budget)||0);
         const info = VERDICT_TEXT[v];
         verdictEl.className = "verdict show " + info.cls;
@@ -491,6 +609,9 @@
     function render(){
       const s = readState();
       const scene = s.scene || "idle";
+
+      handleFly(s);                          // Live ON: fly the just-added item in
+      if(scene !== "result") clearMontage(); // drop any montage if we leave the reveal
 
       if(scene === "budget"){
         budgetAmt.textContent = peso(s.budget);
@@ -512,6 +633,7 @@
 
     // initial paint + live updates from the control page
     render();
+    firstPaint = false;                       // adds AFTER first paint animate
     window.addEventListener("storage", function(e){
       if(e.key === STATE_KEY || e.key === null) render();
     });

@@ -377,16 +377,26 @@
     let budgetShown = false;
     let nonce = 0;
     let total = 0, count = 0;
+    let addSeq = 0;               // bumped whenever an item quantity increases
+    let lastAdd = null;           // {name, image, seq} — for the view's fly-in
 
     // ---------- localStorage plumbing ----------
     function readViewState(){
       try{ return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; }catch(e){ return {}; }
     }
+    // items currently in the cart — the view uses this for the count-up montage
+    function currentCart(){
+      const c = [];
+      items.forEach((it,i)=>{ const q = qty[i]||0; if(q>0) c.push({ name:it.name, image:it.image, qty:q }); });
+      return c;
+    }
     function pushState(scene){
       viewScene = scene;
       localStorage.setItem(STATE_KEY, JSON.stringify({
         scene: viewScene, budget: budget, total: total,
-        count: count, liveTotal: liveOn, nonce: nonce
+        count: count, liveTotal: liveOn, nonce: nonce,
+        cart: currentCart(),        // for the count-up montage (Live OFF)
+        lastAdd: lastAdd            // for the "item flies in" animation (Live ON)
       }));
     }
     function saveControl(){
@@ -450,7 +460,10 @@
         thumb.textContent = emojiFor(it.name);           // fallback until image loads
         if(it.image){
           const img = new Image();
-          img.alt = it.name; img.loading = "lazy";
+          img.alt = it.name;
+          // NB: do NOT set loading="lazy" here — a detached image that is only
+          // appended on load never loads (it waits to be in the DOM, but we only
+          // put it in the DOM once it has loaded). That deadlock hid every thumb.
           img.onload = ()=>{ thumb.textContent=""; thumb.appendChild(img); };
           img.onerror = ()=>{};                          // keep emoji fallback
           img.src = "img/" + encodeURIComponent(it.image);
@@ -484,8 +497,10 @@
         input.addEventListener("input", ()=>{
           let v = parseInt(input.value,10);
           if(isNaN(v) || v < 0) v = 0;
+          const prev = qty[i]||0;
           qty[i] = v;
           refreshRow(i);
+          if(v > prev) noteAdd(i);
           afterChange();
         });
         input.addEventListener("blur", ()=>{ input.value = qty[i]||0; });
@@ -503,11 +518,20 @@
       subEls[i].textContent = q ? (q + " × " + peso(it.price) + " = " + peso(q*it.price)) : "";
       rowEls[i].classList.toggle("active", q>0);
     }
+    // record the just-added item so the view can fly its image in (Live ON)
+    function noteAdd(i){
+      const it = items[i];
+      if(!it) return;
+      addSeq++;
+      lastAdd = { name: it.name, image: it.image, seq: addSeq };
+    }
     function setQty(i, val){
       val = Math.max(0, Math.floor(val||0));
+      const prev = qty[i]||0;
       qty[i] = val;
       qtyInputs[i].value = val;
       refreshRow(i);
+      if(val > prev) noteAdd(i);       // an increase → animate it on the view
       afterChange();
     }
 
@@ -555,6 +579,7 @@
       if(count > 0 && !confirm("Reset all quantities and clear the view screen?")) return;
       qty = items.map(()=>0);
       budgetShown = false;
+      lastAdd = null;
       recompute();
       buildRows();
       updateFooterTotals();
